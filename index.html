@@ -1265,19 +1265,12 @@ body.theme-female {
   letter-spacing: 0.02em; opacity: 0;
   white-space: nowrap; user-select: none;
 }
-.ios-intro-word.slide-in {
-  /* animation handled by @keyframes wordFlyIn */
-}
-.ios-intro-word.slide-out {
-  /* animation handled by @keyframes wordFlyOut */
-}
 .ios-intro-logo {
   position: absolute;
   display: flex; flex-direction: column; align-items: center;
   opacity: 0; transform: scale(0.3);
 }
 .ios-intro-logo.show {
-  /* animation handled by @keyframes logoBounceIn */
 }
 .ios-intro-logo .logo-icon {
   width: 88px; height: 88px; border-radius: 22px;
@@ -2032,14 +2025,20 @@ body.theme-female {
   let i = 0;
 
   function showWord(word) {
+    // 先彻底清除动画状态
+    el.style.animation = 'none';
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(80px) scale(0.8)';
+    el.style.filter = 'blur(8px)';
     el.className = 'ios-intro-word';
     el.textContent = word;
+    // 强制浏览器应用上面的内联样式
     void el.offsetWidth;
+    // 通过 class 触发 keyframe 动画
     el.classList.add('slide-in');
   }
 
   function hideWord(cb) {
-    // 先加 slide-out 再移 slide-in，避免 forwards fill 消失导致文字闪烁
     el.classList.add('slide-out');
     el.classList.remove('slide-in');
     setTimeout(cb, 750);
