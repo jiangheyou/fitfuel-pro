@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#f2f2f7" id="metaThemeColor">
-<title>FitFuel Pro 2.2 - 智能健身饮食规划</title>
+<title>FitFuel Pro 2.1 - 智能健身饮食规划</title>
 <!-- Firebase SDK (compat mode for single-file) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -1389,7 +1389,7 @@ body.theme-female {
   <div class="auth-header">
     <div class="auth-logo-icon"><i class="ri-fire-line"></i></div>
     <div class="auth-title">FitFuel Pro</div>
-    <div class="auth-subtitle">AI 智能健身饮食规划 2.2</div>
+    <div class="auth-subtitle">AI 智能健身饮食规划 2.1</div>
   </div>
   <div class="auth-form" id="regForm">
     <div class="auth-tabs">
@@ -2134,6 +2134,16 @@ let currentUser = null;
 let fbApp = null, fbAuth = null, fbDb = null;
 let firebaseAvailable = false;
 
+// 内置 Firebase 默认配置（无需用户手动配置，安全由 Firestore 规则控制）
+const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBZLvmt6swgd5RRWHTQLu6rtEOaHW6SHdI",
+  authDomain: "jiang-23d06.firebaseapp.com",
+  projectId: "jiang-23d06",
+  storageBucket: "jiang-23d06.firebasestorage.app",
+  messagingSenderId: "684098366586",
+  appId: "1:684098366586:web:58969b10282d0daee11fc3"
+};
+
 function initFirebase(config) {
   try {
     if (fbApp) { try { fbApp.delete(); } catch(e) {} }
@@ -2142,13 +2152,7 @@ function initFirebase(config) {
     fbDb = fbApp.firestore();
     firebaseAvailable = true;
     updateFirebaseStatus('connecting');
-    // 测试连接
-    fbAuth.onAuthStateChanged(() => {
-      updateFirebaseStatus('connected');
-    });
-    setTimeout(() => {
-      if (firebaseAvailable) updateFirebaseStatus('connected');
-    }, 3000);
+    // onAuthStateChanged 由 checkSession() 统一注册，此处不重复注册
     return true;
   } catch(e) {
     console.error('Firebase init error:', e);
@@ -2182,34 +2186,57 @@ function saveFirebaseConfig() {
     return;
   }
   try {
-    const config = JSON.parse(raw);
+    // 兼容两种格式：标准JSON("key":value) 和 JS对象(key:value)
+    let config;
+    try {
+      config = JSON.parse(raw);
+    } catch(_) {
+      // JS对象格式，给key加引号后解析
+      const fixed = raw.replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":');
+      config = JSON.parse(fixed);
+    }
     if (!config.apiKey || !config.projectId) throw new Error('缺少 apiKey 或 projectId');
-    localStorage.setItem(FIREBASE_CONFIG_KEY, raw);
+    const normalized = JSON.stringify(config);
+    localStorage.setItem(FIREBASE_CONFIG_KEY, normalized);
     if (initFirebase(config)) {
       alert('Firebase 配置已保存并连接成功！');
     } else {
       alert('Firebase 连接失败，请检查配置');
     }
   } catch(e) {
-    alert('配置 JSON 格式错误：' + e.message);
+    alert('配置格式错误：' + e.message + '\n\n请粘贴 Firebase 控制台提供的配置（花括号内所有内容）');
   }
 }
 
-// 页面加载时自动初始化 Firebase
+// 页面加载时自动初始化 Firebase（内置配置 + 用户可覆盖）
 (function autoInitFirebase() {
-  const raw = localStorage.getItem(FIREBASE_CONFIG_KEY);
-  if (raw) {
-    try {
-      const config = JSON.parse(raw);
-      initFirebase(config);
-      // 填充 textarea
-      setTimeout(() => {
-        const el = document.getElementById('firebaseConfigInput');
-        if (el) el.value = raw;
-      }, 100);
-    } catch(e) {
-      console.error('Auto-init Firebase failed:', e);
+  try {
+    // 优先用 localStorage 覆盖配置，否则用内置默认配置
+    const raw = localStorage.getItem(FIREBASE_CONFIG_KEY);
+    let config;
+    if (raw) {
+      try {
+        try { config = JSON.parse(raw); } catch(_) {
+          const fixed = raw.replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":');
+          config = JSON.parse(fixed);
+        }
+      } catch(e) {
+        console.warn('localStorage Firebase config parse failed, using default');
+        config = DEFAULT_FIREBASE_CONFIG;
+      }
+    } else {
+      config = DEFAULT_FIREBASE_CONFIG;
     }
+    initFirebase(config);
+    // 填充 textarea（用标准化后的JSON）
+    const normalized = JSON.stringify(config, null, 2);
+    setTimeout(() => {
+      const el = document.getElementById('firebaseConfigInput');
+      if (el) el.value = normalized;
+    }, 100);
+  } catch(e) {
+    console.warn('autoInitFirebase failed, using localStorage mode:', e);
+    firebaseAvailable = false;
   }
 })();
 
@@ -2224,7 +2251,7 @@ function perUserKey(base) {
 
 // 写操作：Firebase优先，localStorage缓存
 async function fbSave(collection, docId, data) {
-  const cacheKey = perUserKey('fitfuel_' + collection);
+  const cacheKey = perUserKey('fitfuel_' + collection + '_' + docId);
   try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch(e) {}
   if (firebaseAvailable && fbDb && getUserUid() !== 'local') {
     try {
@@ -2237,7 +2264,7 @@ async function fbSave(collection, docId, data) {
 
 // 读操作：Firebase优先，降级localStorage缓存
 async function fbLoad(collection, docId) {
-  const cacheKey = perUserKey('fitfuel_' + collection);
+  const cacheKey = perUserKey('fitfuel_' + collection + '_' + docId);
   if (firebaseAvailable && fbDb && getUserUid() !== 'local') {
     try {
       const doc = await fbDb.collection('users').doc(getUserUid()).collection(collection).doc(docId).get();
@@ -2270,14 +2297,14 @@ async function fbLoadAllLogs() {
       const snap = await fbDb.collection('users').doc(getUserUid()).collection('logs').orderBy('date', 'desc').get();
       const logs = snap.docs.map(d => d.data());
       // 更新本地缓存
-      const cacheKey = perUserKey('fitfuel_logs');
+      const cacheKey = perUserKey('fitfuel_logs_all');
       try { localStorage.setItem(cacheKey, JSON.stringify(logs)); } catch(e) {}
       return logs;
     } catch(e) {
       console.warn('Firestore logs load failed:', e);
     }
   }
-  const cacheKey = perUserKey('fitfuel_logs');
+  const cacheKey = perUserKey('fitfuel_logs_all');
   try { return JSON.parse(localStorage.getItem(cacheKey) || '[]'); } catch(e) { return []; }
 }
 
@@ -2336,79 +2363,88 @@ function handleRegister() {
   const phone = document.getElementById('regPhone').value.trim();
   const pwd = document.getElementById('regPassword').value;
   const err = document.getElementById('regError');
-  if (!name) { err.textContent = '请输入姓名'; err.classList.add('show'); return; }
-  if (!phone || phone.length < 8) { err.textContent = '请输入有效的手机号'; err.classList.add('show'); return; }
-  if (pwd.length < 6) { err.textContent = '密码至少6位'; err.classList.add('show'); return; }
+  if (!name) { if (err) { err.textContent = '请输入姓名'; err.classList.add('show'); } return; }
+  if (!phone || phone.length < 8) { if (err) { err.textContent = '请输入有效的手机号'; err.classList.add('show'); } return; }
+  if (pwd.length < 6) { if (err) { err.textContent = '密码至少6位'; err.classList.add('show'); } return; }
 
   if (firebaseAvailable && fbAuth) {
     // Firebase 模式：先检查本地账号防重复，再 Firebase 注册
     const accs = getAccounts();
-    if (accs.find(a => a.phone === phone)) { err.textContent = '该手机号已注册，请直接登录'; err.classList.add('show'); return; }
-    pendingAccount = { name, phone, password: hashPwd(pwd), gender: null };
-    // 也存本地作为备份
-    accs.push(pendingAccount);
-    saveAccounts(accs);
+    if (accs.find(a => a.phone === phone)) { if (err) { err.textContent = '该手机号已注册，请直接登录'; err.classList.add('show'); } return; }
+    // passwordRaw 存明文给 Firebase；password 存 hash 给 localStorage
+    pendingAccount = { name, phone, passwordRaw: pwd, password: hashPwd(pwd), gender: null };
+    // Firebase 分支不在这里写 localStorage，等 confirmGender 成功后再处理
   } else {
     // 纯 localStorage 模式
     const accs = getAccounts();
-    if (accs.find(a => a.phone === phone)) { err.textContent = '该手机号已注册，请直接登录'; err.classList.add('show'); return; }
+    if (accs.find(a => a.phone === phone)) { if (err) { err.textContent = '该手机号已注册，请直接登录'; err.classList.add('show'); } return; }
     pendingAccount = { name, phone, password: hashPwd(pwd), gender: null };
-    accs.push(pendingAccount);
-    saveAccounts(accs);
   }
 
   document.getElementById('regForm').classList.add('hidden');
   const gs = document.getElementById('genderScreen');
-  gs.classList.add('visible');
-  document.getElementById('genderError').classList.remove('show');
-  triggerAuthFormW11(gs);
+  if (gs) gs.classList.add('visible');
+  const ge = document.getElementById('genderError');
+  if (ge) ge.classList.remove('show');
+  if (gs) triggerAuthFormW11(gs);
 }
 
 function selectGender(g) {
+  if (!pendingAccount) return;
   pendingAccount.gender = g;
-  document.getElementById('genderMale').classList.toggle('selected', g === 'male');
-  document.getElementById('genderFemale').classList.toggle('selected', g === 'female');
-  document.getElementById('genderError').classList.remove('show');
+  const gm = document.getElementById('genderMale');
+  const gf = document.getElementById('genderFemale');
+  if (gm) gm.classList.toggle('selected', g === 'male');
+  if (gf) gf.classList.toggle('selected', g === 'female');
+  const ge = document.getElementById('genderError');
+  if (ge) ge.classList.remove('show');
 }
 
 async function confirmGender() {
-  if (!pendingAccount || !pendingAccount.gender) {
-    const e = document.getElementById('genderError');
-    e.textContent = '请选择性别';
-    e.classList.add('show');
-    return;
-  }
-
-  if (firebaseAvailable && fbAuth) {
-    // Firebase 注册
-    const pseudoEmail = pendingAccount.phone + '@fitfuel.app';
-    try {
-      const cred = await fbAuth.createUserWithEmailAndPassword(pseudoEmail, pendingAccount.password);
-      const uid = cred.user.uid;
-      // 保存 profile 到 Firestore
-      await fbDb.collection('users').doc(uid).set({
-        profile: { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender, createdAt: new Date().toISOString() }
-      }, { merge: true });
-      currentUser = { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender, uid: uid };
-      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
-      enterApp();
-    } catch(e) {
-      console.error('Firebase register error:', e);
-      // Firebase 失败则降级 localStorage
-      const accs = getAccounts();
-      if (!accs.find(a => a.phone === pendingAccount.phone)) {
-        accs.push(pendingAccount);
-        saveAccounts(accs);
-      }
-      currentUser = { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender };
-      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
-      enterApp();
+  try {
+    if (!pendingAccount || !pendingAccount.gender) {
+      const e = document.getElementById('genderError');
+      if (e) { e.textContent = '请选择性别'; e.classList.add('show'); }
+      return;
     }
-  } else {
-    // 纯 localStorage 模式（账号已在 handleRegister 中保存）
+
+    // 先用 localStorage 保存账号（无论 Firebase 是否成功，本地都有备份）
+    const accs = getAccounts();
+    if (!accs.find(a => a.phone === pendingAccount.phone)) {
+      accs.push({ name: pendingAccount.name, phone: pendingAccount.phone, password: pendingAccount.password, gender: pendingAccount.gender });
+      saveAccounts(accs);
+    }
+    // 先设置 currentUser 并进入主界面（不等待 Firebase）
     currentUser = { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender };
     localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
     enterApp();
+
+    // 后台尝试 Firebase 注册（不阻塞 UI）
+    if (firebaseAvailable && fbAuth) {
+      const pseudoEmail = pendingAccount.phone + '@fitfuel.app';
+      try {
+        const cred = await fbAuth.createUserWithEmailAndPassword(pseudoEmail, pendingAccount.passwordRaw);
+        const uid = cred.user.uid;
+        currentUser = { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender, uid: uid };
+        localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+        // 保存 profile 到 Firestore（静默）
+        try {
+          await fbDb.collection('users').doc(uid).set({
+            profile: { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender, createdAt: new Date().toISOString() }
+          }, { merge: true });
+        } catch(fe) { console.warn('Firestore save failed:', fe.message); }
+      } catch(e) {
+        console.warn('Firebase register failed:', e.message);
+      }
+    }
+  } catch(err) {
+    console.error('confirmGender fatal error:', err);
+    // 最后防线：即使出错也尝试进入主界面
+    if (pendingAccount) {
+      currentUser = { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender || 'male' };
+      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+      enterApp();
+    }
   }
 }
 
@@ -2416,54 +2452,90 @@ async function handleLogin() {
   const phone = document.getElementById('loginPhone').value.trim();
   const pwd = document.getElementById('loginPassword').value;
   const err = document.getElementById('loginError');
-  if (!phone || !pwd) { err.textContent = '请输入手机号和密码'; err.classList.add('show'); return; }
+  if (!phone || !pwd) { if (err) { err.textContent = '请输入手机号和密码'; err.classList.add('show'); } return; }
 
-  if (firebaseAvailable && fbAuth) {
-    // Firebase 登录
-    const pseudoEmail = phone + '@fitfuel.app';
-    try {
-      const cred = await fbAuth.signInWithEmailAndPassword(pseudoEmail, pwd);
-      const uid = cred.user.uid;
-      // 从 Firestore 加载 profile
-      const doc = await fbDb.collection('users').doc(uid).get();
-      let profile;
-      if (doc.exists && doc.data().profile) {
-        profile = doc.data().profile;
-      } else {
-        // Firestore 没有 profile，用本地数据创建
-        const accs = getAccounts();
-        const acc = accs.find(a => a.phone === phone);
-        profile = acc ? { name: acc.name, phone: acc.phone, gender: acc.gender } : { name: phone, phone: phone, gender: 'male' };
-        await fbDb.collection('users').doc(uid).set({ profile }, { merge: true });
-      }
-      currentUser = { name: profile.name, phone: profile.phone, gender: profile.gender, uid: uid };
-      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
-      enterApp();
-    } catch(e) {
-      console.error('Firebase login error:', e);
-      // Firebase 失败降级 localStorage
-      const accs = getAccounts();
-      const acc = accs.find(a => a.phone === phone);
-      if (!acc || !verifyPwd(pwd, acc.password)) { err.textContent = '手机号或密码错误'; err.classList.add('show'); return; }
+  try {
+    // 优先用 localStorage 验证（快速响应，不依赖 Firebase）
+    const accs = getAccounts();
+    const acc = accs.find(a => a.phone === phone);
+    if (acc && verifyPwd(pwd, acc.password)) {
+      // localStorage 验证成功，直接进入
       currentUser = { name: acc.name, phone: acc.phone, gender: acc.gender };
       localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
       enterApp();
+
+      // 后台尝试 Firebase 登录同步
+      if (firebaseAvailable && fbAuth) {
+        const pseudoEmail = phone + '@fitfuel.app';
+        try {
+          const cred = await fbAuth.signInWithEmailAndPassword(pseudoEmail, pwd);
+          const uid = cred.user.uid;
+          currentUser = { name: acc.name, phone: acc.phone, gender: acc.gender, uid: uid };
+          localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+          // 从 Firestore 加载 profile（静默）
+          try {
+            const doc = await fbDb.collection('users').doc(uid).get();
+            if (doc.exists && doc.data().profile) {
+              const p = doc.data().profile;
+              currentUser = { name: p.name, phone: p.phone, gender: p.gender, uid: uid };
+              localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+            }
+          } catch(fe) { console.warn('Firestore load failed:', fe.message); }
+        } catch(e) {
+          console.warn('Firebase login failed:', e.message);
+        }
+      }
+      return;
     }
-  } else {
-    // 纯 localStorage 模式
+
+    // localStorage 没找到或密码不匹配，尝试 Firebase（可能是纯 Firebase 用户）
+    if (firebaseAvailable && fbAuth) {
+      const pseudoEmail = phone + '@fitfuel.app';
+      try {
+        const cred = await fbAuth.signInWithEmailAndPassword(pseudoEmail, pwd);
+        const uid = cred.user.uid;
+        const doc = await fbDb.collection('users').doc(uid).get();
+        let profile;
+        if (doc.exists && doc.data().profile) {
+          profile = doc.data().profile;
+        } else {
+          profile = { name: phone, phone: phone, gender: 'male' };
+        }
+        currentUser = { name: profile.name, phone: profile.phone, gender: profile.gender, uid: uid };
+        localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+        // 同时存到 localStorage
+        if (!acc) {
+          accs.push({ name: profile.name, phone: profile.phone, password: hashPwd(pwd), gender: profile.gender });
+          saveAccounts(accs);
+        }
+        enterApp();
+        return;
+      } catch(e) {
+        console.warn('Firebase auth failed:', e.message);
+      }
+    }
+
+    // 所有方式都失败
+    if (err) { err.textContent = '手机号或密码错误'; err.classList.add('show'); }
+  } catch(err2) {
+    console.error('handleLogin fatal error:', err2);
+    // 最后防线
     const accs = getAccounts();
     const acc = accs.find(a => a.phone === phone);
-    if (!acc || !verifyPwd(pwd, acc.password)) { err.textContent = '手机号或密码错误'; err.classList.add('show'); return; }
-    currentUser = { name: acc.name, phone: acc.phone, gender: acc.gender };
-    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
-    enterApp();
+    if (acc) {
+      currentUser = { name: acc.name, phone: acc.phone, gender: acc.gender };
+      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+      enterApp();
+    } else {
+      if (err) { err.textContent = '登录失败：' + (err2.message || '未知错误'); err.classList.add('show'); }
+    }
   }
 }
 
-function handleLogout() {
+async function handleLogout() {
   if (!confirm('确定要退出登录吗？')) return;
   if (firebaseAvailable && fbAuth) {
-    fbAuth.signOut().catch(e => console.warn('Firebase signOut error:', e));
+    try { await fbAuth.signOut(); } catch(e) { console.warn('Firebase signOut error:', e); }
   }
   localStorage.removeItem(CURRENT_USER_KEY);
   localStorage.removeItem('fitfuel_intro_seen');
@@ -2485,33 +2557,48 @@ function applyTheme(g) {
 
 async function enterApp() {
   if (!currentUser) return;
-  applyTheme(currentUser.gender);
-  // Show female fields for female users
-  if (currentUser.gender === 'female') {
-    document.getElementById('femaleFieldsCard').classList.add('show');
-  }
-  // Set gender display
-  document.getElementById('gender').value = currentUser.gender;
-  document.getElementById('genderDisplay').textContent = currentUser.gender === 'male' ? '♂ 男' : '♀ 女';
-  // Hide auth overlay
-  document.getElementById('authOverlay').classList.add('hidden');
-  // Update toggle subtitle
-  document.getElementById('inputToggleSubtitle').textContent = '欢迎回来，' + currentUser.name + '！请填写身体数据';
+  // 用 DOM 状态防止重复进入（避免 enterAppCalled 标记的竞态条件）
+  const overlay = document.getElementById('authOverlay');
+  if (overlay && overlay.classList.contains('hidden')) return;
 
-  // 从 Firestore 恢复用户数据（静默，不阻塞 UI）
-  if (firebaseAvailable && fbDb && currentUser.uid) {
-    try {
-      const bodyData = await fbLoadBodyData();
-      if (bodyData) {
-        // 填充表单字段
-        if (bodyData.age) document.getElementById('age').value = bodyData.age;
-        if (bodyData.height) document.getElementById('height').value = bodyData.height;
-        if (bodyData.weight) document.getElementById('weight').value = bodyData.weight;
-        if (bodyData.bodyfat) document.getElementById('bodyfat').value = bodyData.bodyfat;
-        if (bodyData.activity) document.getElementById('activity').value = bodyData.activity;
-        if (bodyData.goal) document.getElementById('goal').value = bodyData.goal;
-      }
-    } catch(e) { console.warn('Restore body data failed:', e); }
+  try {
+    // ★ 先隐藏 auth overlay（最关键操作，优先于其他所有 UI 更新）
+    if (overlay) overlay.classList.add('hidden');
+
+    applyTheme(currentUser.gender);
+    // Show female fields for female users
+    if (currentUser.gender === 'female') {
+      const fc = document.getElementById('femaleFieldsCard');
+      if (fc) fc.classList.add('show');
+    }
+    // Set gender display
+    const genderEl = document.getElementById('gender');
+    if (genderEl) genderEl.value = currentUser.gender;
+    const gdEl = document.getElementById('genderDisplay');
+    if (gdEl) gdEl.textContent = currentUser.gender === 'male' ? '♂ 男' : '♀ 女';
+    // Update toggle subtitle
+    const subEl = document.getElementById('inputToggleSubtitle');
+    if (subEl) subEl.textContent = '欢迎回来，' + currentUser.name + '！请填写身体数据';
+
+    // 从 Firestore 恢复用户数据（静默，不阻塞 UI）
+    if (firebaseAvailable && fbDb && currentUser.uid) {
+      try {
+        const bodyData = await fbLoadBodyData();
+        if (bodyData) {
+          // 填充表单字段
+          if (bodyData.age) { const el = document.getElementById('age'); if (el) el.value = bodyData.age; }
+          if (bodyData.height) { const el = document.getElementById('height'); if (el) el.value = bodyData.height; }
+          if (bodyData.weight) { const el = document.getElementById('weight'); if (el) el.value = bodyData.weight; }
+          if (bodyData.bodyfat) { const el = document.getElementById('bodyfat'); if (el) el.value = bodyData.bodyfat; }
+          if (bodyData.activity) { const el = document.getElementById('activity'); if (el) el.value = bodyData.activity; }
+          if (bodyData.goal) { const el = document.getElementById('goal'); if (el) el.value = bodyData.goal; }
+        }
+      } catch(e) { console.warn('Restore body data failed:', e); }
+    }
+  } catch(e) {
+    console.error('enterApp error:', e);
+    // 即使出错也要确保隐藏 auth overlay
+    if (overlay && !overlay.classList.contains('hidden')) overlay.classList.add('hidden');
   }
 }
 
@@ -2520,8 +2607,26 @@ async function enterApp() {
   // Firebase 模式：监听 auth 状态
   if (firebaseAvailable && fbAuth) {
     fbAuth.onAuthStateChanged(async (user) => {
+      const overlay = document.getElementById('authOverlay');
+      // 如果 auth overlay 已隐藏 = 用户已在主界面，不要干扰
+      if (overlay && overlay.classList.contains('hidden')) {
+        if (user) {
+          updateFirebaseStatus('connected');
+          // 仅静默更新 profile
+          try {
+            const doc = await fbDb.collection('users').doc(user.uid).get();
+            if (doc.exists && doc.data().profile) {
+              const p = doc.data().profile;
+              currentUser = { name: p.name, phone: p.phone, gender: p.gender, uid: user.uid };
+              localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+            }
+          } catch(e) { console.warn('Profile refresh failed:', e); }
+        }
+        return;
+      }
       if (user) {
-        // Firebase 已登录，加载 profile
+        updateFirebaseStatus('connected');
+        // 首次加载：Firebase 有登录态但页面还在 auth 界面
         try {
           const doc = await fbDb.collection('users').doc(user.uid).get();
           let profile;
@@ -2533,7 +2638,7 @@ async function enterApp() {
             if (s) {
               const local = JSON.parse(s);
               profile = { name: local.name, phone: local.phone, gender: local.gender };
-              await fbDb.collection('users').doc(user.uid).set({ profile }, { merge: true });
+              try { await fbDb.collection('users').doc(user.uid).set({ profile }, { merge: true }); } catch(fe) {}
             } else {
               profile = { name: '用户', phone: '', gender: 'male' };
             }
@@ -2543,11 +2648,11 @@ async function enterApp() {
           enterApp();
         } catch(e) {
           console.error('Firebase session load error:', e);
-          // 降级 localStorage
           const s = localStorage.getItem(CURRENT_USER_KEY);
           if (s) { currentUser = JSON.parse(s); enterApp(); }
         }
       } else {
+        updateFirebaseStatus('disconnected');
         // Firebase 未登录
         const s = localStorage.getItem(CURRENT_USER_KEY);
         if (s) {
@@ -2576,9 +2681,10 @@ async function enterApp() {
 
 function showAuthOverlayIfNeeded() {
   const introSeen = localStorage.getItem('fitfuel_intro_seen');
+  const overlay = document.getElementById('authOverlay');
+  if (!overlay) return;
+  overlay.classList.remove('hidden');
   if (introSeen) {
-    const overlay = document.getElementById('authOverlay');
-    overlay.classList.remove('hidden');
     setTimeout(() => {
       overlay.classList.add('w11-ready');
       const children = overlay.children;
