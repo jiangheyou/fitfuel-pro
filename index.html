@@ -6,7 +6,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#f2f2f7" id="metaThemeColor">
-<title>FitFuel Pro 2.1 - 智能健身饮食规划</title>
+<title>FitFuel Pro 2.2 - 智能健身饮食规划</title>
+<!-- Firebase SDK (compat mode for single-file) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
 <style>
@@ -1385,7 +1389,7 @@ body.theme-female {
   <div class="auth-header">
     <div class="auth-logo-icon"><i class="ri-fire-line"></i></div>
     <div class="auth-title">FitFuel Pro</div>
-    <div class="auth-subtitle">AI 智能健身饮食规划 2.1</div>
+    <div class="auth-subtitle">AI 智能健身饮食规划 2.2</div>
   </div>
   <div class="auth-form" id="regForm">
     <div class="auth-tabs">
@@ -1472,6 +1476,25 @@ body.theme-female {
     <div style="display:flex;gap:10px;">
       <button class="btn btn-secondary" onclick="closeApiModal()" style="flex:1;">取消</button>
       <button class="btn btn-primary" onclick="saveApiKey()" style="flex:1;">保存</button>
+    </div>
+
+    <!-- Firebase 配置区域 -->
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <i class="ri-cloud-line" style="font-size:18px;color:var(--accent-primary);"></i>
+        <label class="form-label" style="margin:0;">Firebase 云端同步</label>
+        <span id="firebaseStatus" style="width:8px;height:8px;border-radius:50%;background:#ccc;display:inline-block;" title="未连接"></span>
+      </div>
+      <div class="modal-desc" style="margin-bottom:8px;font-size:12px;">
+        粘贴 Firebase 项目配置 JSON，启用云端账号和数据同步。<br>
+        无配置则使用本地存储模式。
+      </div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <textarea class="form-input" id="firebaseConfigInput" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","storageBucket":"...","messagingSenderId":"...","appId":"..."}' style="min-height:90px;font-size:11px;font-family:monospace;resize:vertical;"></textarea>
+      </div>
+      <button class="btn btn-secondary" onclick="saveFirebaseConfig()" style="width:100%;font-size:13px;">
+        <i class="ri-cloud-line"></i> 保存并连接 Firebase
+      </button>
     </div>
   </div>
 </div>
@@ -2100,12 +2123,165 @@ body.theme-female {
   setTimeout(next, 300);
 })();
 
-// ============ AUTH SYSTEM ============
+// ============ FIREBASE + AUTH SYSTEM ============
 const ACCOUNTS_KEY = 'fitfuel_accounts';
 const CURRENT_USER_KEY = 'fitfuel_current_user';
+const FIREBASE_CONFIG_KEY = 'fitfuel_firebase_config';
 let pendingAccount = null;
 let currentUser = null;
 
+// ===== Firebase 混合模式 =====
+let fbApp = null, fbAuth = null, fbDb = null;
+let firebaseAvailable = false;
+
+function initFirebase(config) {
+  try {
+    if (fbApp) { try { fbApp.delete(); } catch(e) {} }
+    fbApp = firebase.initializeApp(config);
+    fbAuth = fbApp.auth();
+    fbDb = fbApp.firestore();
+    firebaseAvailable = true;
+    updateFirebaseStatus('connecting');
+    // 测试连接
+    fbAuth.onAuthStateChanged(() => {
+      updateFirebaseStatus('connected');
+    });
+    setTimeout(() => {
+      if (firebaseAvailable) updateFirebaseStatus('connected');
+    }, 3000);
+    return true;
+  } catch(e) {
+    console.error('Firebase init error:', e);
+    firebaseAvailable = false;
+    updateFirebaseStatus('error');
+    return false;
+  }
+}
+
+function updateFirebaseStatus(state) {
+  const el = document.getElementById('firebaseStatus');
+  if (!el) return;
+  const map = {
+    'connecting': { bg: '#f0ad4e', title: '连接中...' },
+    'connected':  { bg: '#28a745', title: '已连接' },
+    'error':      { bg: '#dc3545', title: '连接失败' },
+    'disconnected': { bg: '#ccc', title: '未配置' }
+  };
+  const s = map[state] || map['disconnected'];
+  el.style.background = s.bg;
+  el.title = s.title;
+}
+
+function saveFirebaseConfig() {
+  const raw = document.getElementById('firebaseConfigInput').value.trim();
+  if (!raw) {
+    localStorage.removeItem(FIREBASE_CONFIG_KEY);
+    firebaseAvailable = false;
+    updateFirebaseStatus('disconnected');
+    alert('已清除 Firebase 配置，切换为本地存储模式');
+    return;
+  }
+  try {
+    const config = JSON.parse(raw);
+    if (!config.apiKey || !config.projectId) throw new Error('缺少 apiKey 或 projectId');
+    localStorage.setItem(FIREBASE_CONFIG_KEY, raw);
+    if (initFirebase(config)) {
+      alert('Firebase 配置已保存并连接成功！');
+    } else {
+      alert('Firebase 连接失败，请检查配置');
+    }
+  } catch(e) {
+    alert('配置 JSON 格式错误：' + e.message);
+  }
+}
+
+// 页面加载时自动初始化 Firebase
+(function autoInitFirebase() {
+  const raw = localStorage.getItem(FIREBASE_CONFIG_KEY);
+  if (raw) {
+    try {
+      const config = JSON.parse(raw);
+      initFirebase(config);
+      // 填充 textarea
+      setTimeout(() => {
+        const el = document.getElementById('firebaseConfigInput');
+        if (el) el.value = raw;
+      }, 100);
+    } catch(e) {
+      console.error('Auto-init Firebase failed:', e);
+    }
+  }
+})();
+
+// ===== Firestore 混合读写封装 =====
+function getUserUid() {
+  return (currentUser && currentUser.uid) || 'local';
+}
+
+function perUserKey(base) {
+  return base + '_' + getUserUid();
+}
+
+// 写操作：Firebase优先，localStorage缓存
+async function fbSave(collection, docId, data) {
+  const cacheKey = perUserKey('fitfuel_' + collection);
+  try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch(e) {}
+  if (firebaseAvailable && fbDb && getUserUid() !== 'local') {
+    try {
+      await fbDb.collection('users').doc(getUserUid()).collection(collection).doc(docId).set(data, { merge: true });
+    } catch(e) {
+      console.warn('Firestore write failed, cached locally:', e);
+    }
+  }
+}
+
+// 读操作：Firebase优先，降级localStorage缓存
+async function fbLoad(collection, docId) {
+  const cacheKey = perUserKey('fitfuel_' + collection);
+  if (firebaseAvailable && fbDb && getUserUid() !== 'local') {
+    try {
+      const doc = await fbDb.collection('users').doc(getUserUid()).collection(collection).doc(docId).get();
+      if (doc.exists) {
+        const data = doc.data();
+        try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch(e) {}
+        return data;
+      }
+    } catch(e) {
+      console.warn('Firestore read failed, using cache:', e);
+    }
+  }
+  // 降级读缓存
+  try { return JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch(e) { return null; }
+}
+
+// 保存整个用户数据集（profile/bodyData/planResult）
+async function fbSaveProfile(data) { await fbSave('profile', 'main', data); }
+async function fbLoadProfile() { return await fbLoad('profile', 'main'); }
+async function fbSaveBodyData(data) { await fbSave('bodyData', 'main', data); }
+async function fbLoadBodyData() { return await fbLoad('bodyData', 'main'); }
+async function fbSavePlanResult(data) { await fbSave('planResult', 'main', data); }
+async function fbLoadPlanResult() { return await fbLoad('planResult', 'main'); }
+
+// 日志：批量保存和加载
+async function fbSaveLog(entry) { await fbSave('logs', entry.date, entry); }
+async function fbLoadAllLogs() {
+  if (firebaseAvailable && fbDb && getUserUid() !== 'local') {
+    try {
+      const snap = await fbDb.collection('users').doc(getUserUid()).collection('logs').orderBy('date', 'desc').get();
+      const logs = snap.docs.map(d => d.data());
+      // 更新本地缓存
+      const cacheKey = perUserKey('fitfuel_logs');
+      try { localStorage.setItem(cacheKey, JSON.stringify(logs)); } catch(e) {}
+      return logs;
+    } catch(e) {
+      console.warn('Firestore logs load failed:', e);
+    }
+  }
+  const cacheKey = perUserKey('fitfuel_logs');
+  try { return JSON.parse(localStorage.getItem(cacheKey) || '[]'); } catch(e) { return []; }
+}
+
+// ===== 本地 localStorage 认证（降级模式） =====
 function getAccounts() { try { return JSON.parse(localStorage.getItem(ACCOUNTS_KEY) || '[]'); } catch(e) { return []; } }
 function saveAccounts(a) { localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(a)); }
 function hashPwd(p) { try { return btoa(encodeURIComponent(p)); } catch(e) { return p; } }
@@ -2163,14 +2339,28 @@ function handleRegister() {
   if (!name) { err.textContent = '请输入姓名'; err.classList.add('show'); return; }
   if (!phone || phone.length < 8) { err.textContent = '请输入有效的手机号'; err.classList.add('show'); return; }
   if (pwd.length < 6) { err.textContent = '密码至少6位'; err.classList.add('show'); return; }
-  const accs = getAccounts();
-  if (accs.find(a => a.phone === phone)) { err.textContent = '该手机号已注册，请直接登录'; err.classList.add('show'); return; }
-  pendingAccount = { name, phone, password: hashPwd(pwd), gender: null };
+
+  if (firebaseAvailable && fbAuth) {
+    // Firebase 模式：先检查本地账号防重复，再 Firebase 注册
+    const accs = getAccounts();
+    if (accs.find(a => a.phone === phone)) { err.textContent = '该手机号已注册，请直接登录'; err.classList.add('show'); return; }
+    pendingAccount = { name, phone, password: hashPwd(pwd), gender: null };
+    // 也存本地作为备份
+    accs.push(pendingAccount);
+    saveAccounts(accs);
+  } else {
+    // 纯 localStorage 模式
+    const accs = getAccounts();
+    if (accs.find(a => a.phone === phone)) { err.textContent = '该手机号已注册，请直接登录'; err.classList.add('show'); return; }
+    pendingAccount = { name, phone, password: hashPwd(pwd), gender: null };
+    accs.push(pendingAccount);
+    saveAccounts(accs);
+  }
+
   document.getElementById('regForm').classList.add('hidden');
   const gs = document.getElementById('genderScreen');
   gs.classList.add('visible');
   document.getElementById('genderError').classList.remove('show');
-  // Win11 staggered entrance for gender screen
   triggerAuthFormW11(gs);
 }
 
@@ -2181,36 +2371,100 @@ function selectGender(g) {
   document.getElementById('genderError').classList.remove('show');
 }
 
-function confirmGender() {
+async function confirmGender() {
   if (!pendingAccount || !pendingAccount.gender) {
     const e = document.getElementById('genderError');
     e.textContent = '请选择性别';
     e.classList.add('show');
     return;
   }
-  const accs = getAccounts();
-  accs.push(pendingAccount);
-  saveAccounts(accs);
-  currentUser = { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender };
-  localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
-  enterApp();
+
+  if (firebaseAvailable && fbAuth) {
+    // Firebase 注册
+    const pseudoEmail = pendingAccount.phone + '@fitfuel.app';
+    try {
+      const cred = await fbAuth.createUserWithEmailAndPassword(pseudoEmail, pendingAccount.password);
+      const uid = cred.user.uid;
+      // 保存 profile 到 Firestore
+      await fbDb.collection('users').doc(uid).set({
+        profile: { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender, createdAt: new Date().toISOString() }
+      }, { merge: true });
+      currentUser = { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender, uid: uid };
+      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+      enterApp();
+    } catch(e) {
+      console.error('Firebase register error:', e);
+      // Firebase 失败则降级 localStorage
+      const accs = getAccounts();
+      if (!accs.find(a => a.phone === pendingAccount.phone)) {
+        accs.push(pendingAccount);
+        saveAccounts(accs);
+      }
+      currentUser = { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender };
+      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+      enterApp();
+    }
+  } else {
+    // 纯 localStorage 模式（账号已在 handleRegister 中保存）
+    currentUser = { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender };
+    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+    enterApp();
+  }
 }
 
-function handleLogin() {
+async function handleLogin() {
   const phone = document.getElementById('loginPhone').value.trim();
   const pwd = document.getElementById('loginPassword').value;
   const err = document.getElementById('loginError');
   if (!phone || !pwd) { err.textContent = '请输入手机号和密码'; err.classList.add('show'); return; }
-  const accs = getAccounts();
-  const acc = accs.find(a => a.phone === phone);
-  if (!acc || !verifyPwd(pwd, acc.password)) { err.textContent = '手机号或密码错误'; err.classList.add('show'); return; }
-  currentUser = { name: acc.name, phone: acc.phone, gender: acc.gender };
-  localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
-  enterApp();
+
+  if (firebaseAvailable && fbAuth) {
+    // Firebase 登录
+    const pseudoEmail = phone + '@fitfuel.app';
+    try {
+      const cred = await fbAuth.signInWithEmailAndPassword(pseudoEmail, pwd);
+      const uid = cred.user.uid;
+      // 从 Firestore 加载 profile
+      const doc = await fbDb.collection('users').doc(uid).get();
+      let profile;
+      if (doc.exists && doc.data().profile) {
+        profile = doc.data().profile;
+      } else {
+        // Firestore 没有 profile，用本地数据创建
+        const accs = getAccounts();
+        const acc = accs.find(a => a.phone === phone);
+        profile = acc ? { name: acc.name, phone: acc.phone, gender: acc.gender } : { name: phone, phone: phone, gender: 'male' };
+        await fbDb.collection('users').doc(uid).set({ profile }, { merge: true });
+      }
+      currentUser = { name: profile.name, phone: profile.phone, gender: profile.gender, uid: uid };
+      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+      enterApp();
+    } catch(e) {
+      console.error('Firebase login error:', e);
+      // Firebase 失败降级 localStorage
+      const accs = getAccounts();
+      const acc = accs.find(a => a.phone === phone);
+      if (!acc || !verifyPwd(pwd, acc.password)) { err.textContent = '手机号或密码错误'; err.classList.add('show'); return; }
+      currentUser = { name: acc.name, phone: acc.phone, gender: acc.gender };
+      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+      enterApp();
+    }
+  } else {
+    // 纯 localStorage 模式
+    const accs = getAccounts();
+    const acc = accs.find(a => a.phone === phone);
+    if (!acc || !verifyPwd(pwd, acc.password)) { err.textContent = '手机号或密码错误'; err.classList.add('show'); return; }
+    currentUser = { name: acc.name, phone: acc.phone, gender: acc.gender };
+    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+    enterApp();
+  }
 }
 
 function handleLogout() {
   if (!confirm('确定要退出登录吗？')) return;
+  if (firebaseAvailable && fbAuth) {
+    fbAuth.signOut().catch(e => console.warn('Firebase signOut error:', e));
+  }
   localStorage.removeItem(CURRENT_USER_KEY);
   localStorage.removeItem('fitfuel_intro_seen');
   currentUser = null;
@@ -2229,7 +2483,7 @@ function applyTheme(g) {
   }
 }
 
-function enterApp() {
+async function enterApp() {
   if (!currentUser) return;
   applyTheme(currentUser.gender);
   // Show female fields for female users
@@ -2243,39 +2497,99 @@ function enterApp() {
   document.getElementById('authOverlay').classList.add('hidden');
   // Update toggle subtitle
   document.getElementById('inputToggleSubtitle').textContent = '欢迎回来，' + currentUser.name + '！请填写身体数据';
+
+  // 从 Firestore 恢复用户数据（静默，不阻塞 UI）
+  if (firebaseAvailable && fbDb && currentUser.uid) {
+    try {
+      const bodyData = await fbLoadBodyData();
+      if (bodyData) {
+        // 填充表单字段
+        if (bodyData.age) document.getElementById('age').value = bodyData.age;
+        if (bodyData.height) document.getElementById('height').value = bodyData.height;
+        if (bodyData.weight) document.getElementById('weight').value = bodyData.weight;
+        if (bodyData.bodyfat) document.getElementById('bodyfat').value = bodyData.bodyfat;
+        if (bodyData.activity) document.getElementById('activity').value = bodyData.activity;
+        if (bodyData.goal) document.getElementById('goal').value = bodyData.goal;
+      }
+    } catch(e) { console.warn('Restore body data failed:', e); }
+  }
 }
 
 // Check session on load
 (function checkSession() {
-  try {
-    const s = localStorage.getItem(CURRENT_USER_KEY);
-    if (s) {
-      currentUser = JSON.parse(s);
-      enterApp();
-    } else {
-      // intro动画正在播放时，auth overlay 由 intro 动画结束后激活
-      // 如果没有intro（已看过），直接显示
-      const introSeen = localStorage.getItem('fitfuel_intro_seen');
-      if (introSeen) {
-        const overlay = document.getElementById('authOverlay');
-        overlay.classList.remove('hidden');
-        // 直接触发 Win11 动画
-        setTimeout(() => {
-          overlay.classList.add('w11-ready');
-          const children = overlay.children;
-          for (let c = 0; c < children.length; c++) {
-            ((idx) => {
-              setTimeout(() => { children[idx].classList.add('w11-visible'); }, 100 * (idx + 1));
-            })(c);
+  // Firebase 模式：监听 auth 状态
+  if (firebaseAvailable && fbAuth) {
+    fbAuth.onAuthStateChanged(async (user) => {
+      if (user) {
+        // Firebase 已登录，加载 profile
+        try {
+          const doc = await fbDb.collection('users').doc(user.uid).get();
+          let profile;
+          if (doc.exists && doc.data().profile) {
+            profile = doc.data().profile;
+          } else {
+            // 从 localStorage 迁移
+            const s = localStorage.getItem(CURRENT_USER_KEY);
+            if (s) {
+              const local = JSON.parse(s);
+              profile = { name: local.name, phone: local.phone, gender: local.gender };
+              await fbDb.collection('users').doc(user.uid).set({ profile }, { merge: true });
+            } else {
+              profile = { name: '用户', phone: '', gender: 'male' };
+            }
           }
-        }, 100);
+          currentUser = { name: profile.name, phone: profile.phone, gender: profile.gender, uid: user.uid };
+          localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+          enterApp();
+        } catch(e) {
+          console.error('Firebase session load error:', e);
+          // 降级 localStorage
+          const s = localStorage.getItem(CURRENT_USER_KEY);
+          if (s) { currentUser = JSON.parse(s); enterApp(); }
+        }
+      } else {
+        // Firebase 未登录
+        const s = localStorage.getItem(CURRENT_USER_KEY);
+        if (s) {
+          currentUser = JSON.parse(s);
+          enterApp();
+        } else {
+          showAuthOverlayIfNeeded();
+        }
       }
-      // 否则 intro 动画完成后会自动激活
+    });
+  } else {
+    // 纯 localStorage 模式
+    try {
+      const s = localStorage.getItem(CURRENT_USER_KEY);
+      if (s) {
+        currentUser = JSON.parse(s);
+        enterApp();
+      } else {
+        showAuthOverlayIfNeeded();
+      }
+    } catch(e) {
+      document.getElementById('authOverlay').classList.remove('hidden');
     }
-  } catch(e) {
-    document.getElementById('authOverlay').classList.remove('hidden');
   }
 })();
+
+function showAuthOverlayIfNeeded() {
+  const introSeen = localStorage.getItem('fitfuel_intro_seen');
+  if (introSeen) {
+    const overlay = document.getElementById('authOverlay');
+    overlay.classList.remove('hidden');
+    setTimeout(() => {
+      overlay.classList.add('w11-ready');
+      const children = overlay.children;
+      for (let c = 0; c < children.length; c++) {
+        ((idx) => {
+          setTimeout(() => { children[idx].classList.add('w11-visible'); }, 100 * (idx + 1));
+        })(c);
+      }
+    }, 100);
+  }
+}
 
 // ============ STATE ============
 let userData = null;
@@ -2324,19 +2638,31 @@ let currentTrendPeriod = 7;
 const LOG_STORAGE_KEY = 'fitfuel_logs';
 const LOG_TODAY_KEY = 'fitfuel_logs_today';
 
+// Per-user 日志键
+function logStorageKey() { return perUserKey(LOG_STORAGE_KEY); }
+function logTodayKey() { return perUserKey(LOG_TODAY_KEY); }
+
 function loadLogs() {
-  try { return JSON.parse(localStorage.getItem(LOG_STORAGE_KEY) || '[]'); }
+  try { return JSON.parse(localStorage.getItem(logStorageKey()) || '[]'); }
   catch(e) { return []; }
 }
 function saveLogs(logs) {
-  localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(logs));
+  localStorage.setItem(logStorageKey(), JSON.stringify(logs));
+  // Firebase 异步同步
+  if (firebaseAvailable && fbDb && getUserUid() !== 'local') {
+    fbSaveLog(logs.length > 0 ? logs[0] : null).catch(() => {});
+  }
 }
-function addOrUpdateLog(entry) {
+async function addOrUpdateLog(entry) {
   const logs = loadLogs();
   const idx = logs.findIndex(l => l.date === entry.date);
   if (idx >= 0) { logs[idx] = entry; } else { logs.push(entry); }
   logs.sort((a, b) => b.date.localeCompare(a.date));
   saveLogs(logs);
+  // Firebase 同步
+  if (firebaseAvailable && fbDb && getUserUid() !== 'local') {
+    await fbSaveLog(entry);
+  }
 }
 function deleteLog(date) {
   const logs = loadLogs().filter(l => l.date !== date);
@@ -2900,6 +3226,10 @@ function calculatePlan() {
     phaseData: JSON.parse(JSON.stringify(phaseData))
   };
   planResult = { bmi, bmiCategory, bmiColor, bmr: Math.round(bmr), tdee: Math.round(tdee), targetCal, proteinG, carbG, fatG, waterL, proteinPct, carbPct, fatPct, proteinPerKg };
+
+  // 保存到 Firestore（静默，不阻塞 UI）
+  fbSaveBodyData(userData).catch(() => {});
+  fbSavePlanResult(planResult).catch(() => {});
 
   // Hide empty state, show progress bar
   document.getElementById('emptyState').style.display = 'none';
@@ -4580,7 +4910,7 @@ function logDraftSave() {
   clearTimeout(_logDraftTimer);
   _logDraftTimer = setTimeout(() => {
     const entry = collectLogFormData();
-    if (entry) localStorage.setItem(LOG_TODAY_KEY, JSON.stringify(entry));
+    if (entry) localStorage.setItem(logTodayKey(), JSON.stringify(entry));
   }, 1000);
 }
 function collectLogFormData() {
@@ -4609,7 +4939,7 @@ function handleLogSave() {
   if (!entry || !entry.date) { showToast('请填写日期', 'error'); return; }
   const oldWeight = userData?.weight;
   addOrUpdateLog(entry);
-  localStorage.removeItem(LOG_TODAY_KEY);
+  localStorage.removeItem(logTodayKey());
   showToast('记录已保存', 'success');
   updateLogFabBadge();
   // Close FAB panel after save
