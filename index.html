@@ -618,6 +618,22 @@
   .api-badge.connected { border-color: rgba(52,199,89,0.3); color: var(--success); }
   .api-badge i { font-size: 14px; }
 
+  /* Cloud Sync Badge */
+  .cloud-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 500;
+    background: var(--bg-card); border: 1px solid var(--border);
+    color: var(--text-secondary); cursor: pointer; transition: all 0.3s ease;
+    box-shadow: var(--shadow-sm);
+  }
+  .cloud-badge:hover { border-color: var(--accent-primary); color: var(--text-primary); }
+  .cloud-badge.synced { border-color: rgba(52,199,89,0.3); color: var(--success); }
+  .cloud-badge.syncing { border-color: rgba(0,122,255,0.3); color: var(--accent-primary); }
+  .cloud-badge.sync-failed { border-color: rgba(255,59,48,0.3); color: var(--danger); }
+  .cloud-badge i { font-size: 14px; }
+  .cloud-badge.syncing i { animation: cloudSpin 1s linear infinite; }
+  @keyframes cloudSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
   /* Step Progress Bar — iOS segmented */
   .step-progress {
     display: flex; align-items: center; justify-content: center;
@@ -1565,6 +1581,10 @@ body.theme-female {
         <i class="ri-key-2-line"></i>
         <span id="apiBadgeText">未连接</span>
       </div>
+      <div class="cloud-badge" id="cloudBadge" onclick="handleCloudBadgeClick()">
+        <i class="ri-cloud-line" id="cloudIcon"></i>
+        <span id="cloudBadgeText">未同步</span>
+      </div>
     </div>
   </header>
 
@@ -2421,20 +2441,30 @@ async function confirmGender() {
 
     // 后台尝试 Firebase 注册（不阻塞 UI）
     if (firebaseAvailable && fbAuth) {
+      updateCloudBadge('syncing');
+      showToast('正在注册并同步到云端...', 'info');
       const pseudoEmail = pendingAccount.phone + '@fitfuel.app';
       try {
         const cred = await fbAuth.createUserWithEmailAndPassword(pseudoEmail, pendingAccount.passwordRaw);
         const uid = cred.user.uid;
         currentUser = { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender, uid: uid };
         localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
-        // 保存 profile 到 Firestore（静默）
+        // 保存 profile 到 Firestore
         try {
           await fbDb.collection('users').doc(uid).set({
             profile: { name: pendingAccount.name, phone: pendingAccount.phone, gender: pendingAccount.gender, createdAt: new Date().toISOString() }
           }, { merge: true });
-        } catch(fe) { console.warn('Firestore save failed:', fe.message); }
+          updateCloudBadge('synced');
+          showToast('云端注册成功 ☁', 'success');
+        } catch(fe) {
+          console.warn('Firestore save failed:', fe.message);
+          updateCloudBadge('failed');
+          showToast('云端保存失败：' + fe.message, 'error');
+        }
       } catch(e) {
         console.warn('Firebase register failed:', e.message);
+        updateCloudBadge('failed');
+        showToast('云端注册失败：' + e.message, 'error');
       }
     }
   } catch(err) {
@@ -2466,13 +2496,15 @@ async function handleLogin() {
 
       // 后台尝试 Firebase 登录同步
       if (firebaseAvailable && fbAuth) {
+        updateCloudBadge('syncing');
+        showToast('正在同步云端数据...', 'info');
         const pseudoEmail = phone + '@fitfuel.app';
         try {
           const cred = await fbAuth.signInWithEmailAndPassword(pseudoEmail, pwd);
           const uid = cred.user.uid;
           currentUser = { name: acc.name, phone: acc.phone, gender: acc.gender, uid: uid };
           localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
-          // 从 Firestore 加载 profile（静默）
+          // 从 Firestore 加载 profile
           try {
             const doc = await fbDb.collection('users').doc(uid).get();
             if (doc.exists && doc.data().profile) {
@@ -2480,9 +2512,16 @@ async function handleLogin() {
               currentUser = { name: p.name, phone: p.phone, gender: p.gender, uid: uid };
               localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
             }
-          } catch(fe) { console.warn('Firestore load failed:', fe.message); }
+            updateCloudBadge('synced');
+            showToast('云端同步成功 ☁', 'success');
+          } catch(fe) {
+            console.warn('Firestore load failed:', fe.message);
+            updateCloudBadge('failed');
+            showToast('云端数据加载失败', 'error');
+          }
         } catch(e) {
           console.warn('Firebase login failed:', e.message);
+          updateCloudBadge('failed');
         }
       }
       return;
@@ -2490,6 +2529,7 @@ async function handleLogin() {
 
     // localStorage 没找到或密码不匹配，尝试 Firebase（可能是纯 Firebase 用户）
     if (firebaseAvailable && fbAuth) {
+      updateCloudBadge('syncing');
       const pseudoEmail = phone + '@fitfuel.app';
       try {
         const cred = await fbAuth.signInWithEmailAndPassword(pseudoEmail, pwd);
@@ -2508,10 +2548,13 @@ async function handleLogin() {
           accs.push({ name: profile.name, phone: profile.phone, password: hashPwd(pwd), gender: profile.gender });
           saveAccounts(accs);
         }
+        updateCloudBadge('synced');
+        showToast('云端登录成功 ☁', 'success');
         enterApp();
         return;
       } catch(e) {
         console.warn('Firebase auth failed:', e.message);
+        updateCloudBadge('failed');
       }
     }
 
@@ -2564,6 +2607,15 @@ async function enterApp() {
   try {
     // ★ 先隐藏 auth overlay（最关键操作，优先于其他所有 UI 更新）
     if (overlay) overlay.classList.add('hidden');
+
+    // 设置初始云同步状态
+    if (firebaseAvailable && fbAuth && currentUser.uid) {
+      updateCloudBadge('synced');
+    } else if (firebaseAvailable) {
+      updateCloudBadge('failed');
+    } else {
+      updateCloudBadge('offline');
+    }
 
     applyTheme(currentUser.gender);
     // Show female fields for female users
@@ -2922,6 +2974,86 @@ function showToast(msg, type='info') {
   t.textContent = msg;
   c.appendChild(t);
   setTimeout(() => t.remove(), 3000);
+}
+
+// ============ CLOUD SYNC BADGE ============
+function updateCloudBadge(status, detail='') {
+  const badge = document.getElementById('cloudBadge');
+  const icon = document.getElementById('cloudIcon');
+  const text = document.getElementById('cloudBadgeText');
+  if (!badge || !icon || !text) return;
+  badge.classList.remove('synced','syncing','sync-failed');
+  if (status === 'synced') {
+    badge.classList.add('synced');
+    icon.className = 'ri-cloud-line';
+    text.textContent = '已同步';
+  } else if (status === 'syncing') {
+    badge.classList.add('syncing');
+    icon.className = 'ri-loader-3-line';
+    text.textContent = '同步中...';
+  } else if (status === 'failed') {
+    badge.classList.add('sync-failed');
+    icon.className = 'ri-cloud-off-line';
+    text.textContent = '未同步';
+  } else {
+    icon.className = 'ri-cloud-off-line';
+    text.textContent = '未连接';
+  }
+}
+
+async function handleCloudBadgeClick() {
+  if (!firebaseAvailable || !fbAuth) {
+    showToast('请先配置 Firebase 以启用云同步', 'error');
+    openApiModal();
+    return;
+  }
+  if (!currentUser) return;
+  // 如果之前同步失败，点击重试
+  const badge = document.getElementById('cloudBadge');
+  if (badge && badge.classList.contains('sync-failed')) {
+    await syncAccountToCloud();
+  }
+}
+
+async function syncAccountToCloud() {
+  if (!firebaseAvailable || !fbAuth || !fbDb || !currentUser) return;
+  updateCloudBadge('syncing');
+  showToast('正在同步账号到云端...', 'info');
+  try {
+    // 确保 Firebase Auth 已登录
+    let user = fbAuth.currentUser;
+    if (!user) {
+      const pseudoEmail = (currentUser.phone || 'user@fitfuel.app') + '@fitfuel.app';
+      const saved = getAccounts().find(a => a.phone === currentUser.phone);
+      const pwd = saved ? atob(saved.password) : 'defaultPwd123!';
+      try { await fbAuth.signInWithEmailAndPassword(pseudoEmail, pwd); }
+      catch(e) {
+        // 用户不存在则注册
+        await fbAuth.createUserWithEmailAndPassword(pseudoEmail, pwd);
+      }
+      user = fbAuth.currentUser;
+    }
+    if (!user) throw new Error('Firebase auth failed');
+    // 保存 profile 到 Firestore
+    await fbDb.collection('users').doc(user.uid).set({
+      profile: {
+        name: currentUser.name,
+        phone: currentUser.phone,
+        gender: currentUser.gender,
+        lastSync: new Date().toISOString()
+      }
+    }, { merge: true });
+    // 同步身体数据
+    if (userData) {
+      await fbDb.collection('users').doc(user.uid).collection('bodyData').doc('latest').set(userData, { merge: true });
+    }
+    updateCloudBadge('synced');
+    showToast('云端同步成功 ☁', 'success');
+  } catch(e) {
+    console.warn('Cloud sync failed:', e.message);
+    updateCloudBadge('failed');
+    showToast('云端同步失败：' + e.message, 'error');
+  }
 }
 
 // ============ TIME PHASE (现在/过去/目标) ============
