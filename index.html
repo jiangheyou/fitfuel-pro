@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#f2f2f7" id="metaThemeColor">
-<title>FitFuel Pro 2.0 - 智能健身饮食规划</title>
+<title>FitFuel Pro 2.1 - 智能健身饮食规划</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
 <style>
@@ -730,6 +730,7 @@ body.theme-female {
   background: var(--bg-primary); z-index: 999;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 24px;
+  transition: opacity 0.5s ease;
 }
 .auth-overlay.hidden { display: none; }
 .auth-header { text-align: center; margin-bottom: 32px; }
@@ -1244,15 +1245,154 @@ body.theme-female {
     border-top: 1px solid var(--border); margin-top: 8px; cursor: pointer;
   }
   .log-fab-link:hover { text-decoration: underline; }
+
+/* ====== iOS Intro Activation Animation ====== */
+.ios-intro {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: #000; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  transition: opacity 0.8s ease;
+}
+.ios-intro.fade-out {
+  opacity: 0; pointer-events: none;
+}
+.ios-intro-word {
+  position: absolute;
+  font-family: -apple-system, 'Inter', 'SF Pro Display', 'Helvetica Neue', sans-serif;
+  font-size: clamp(48px, 12vw, 80px);
+  font-weight: 800; color: #fff;
+  letter-spacing: 0.02em; opacity: 0;
+  white-space: nowrap; user-select: none;
+}
+.ios-intro-word.slide-in {
+  /* animation handled by @keyframes wordFlyIn */
+}
+.ios-intro-word.slide-out {
+  /* animation handled by @keyframes wordFlyOut */
+}
+.ios-intro-logo {
+  position: absolute;
+  display: flex; flex-direction: column; align-items: center;
+  opacity: 0; transform: scale(0.3);
+}
+.ios-intro-logo.show {
+  /* animation handled by @keyframes logoBounceIn */
+}
+.ios-intro-logo .logo-icon {
+  width: 88px; height: 88px; border-radius: 22px;
+  background: linear-gradient(135deg, #5b9cf5, #b872e8);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 40px; color: white;
+  box-shadow: 0 8px 32px rgba(91,156,245,0.5);
+  margin-bottom: 24px;
+}
+.ios-intro-logo .logo-text {
+  font-family: -apple-system, 'Inter', sans-serif;
+  font-size: 32px; font-weight: 900; color: #fff;
+  letter-spacing: -0.02em;
+  text-shadow: 0 2px 20px rgba(0,0,0,0.15);
+}
+.ios-intro-logo .logo-sub {
+  font-size: 15px; color: rgba(255,255,255,0.7);
+  margin-top: 8px; font-weight: 500;
+}
+.ios-intro-logo .logo-date {
+  font-size: 13px; color: rgba(255,255,255,0.5);
+  margin-top: 12px; font-weight: 400;
+  letter-spacing: 0.08em;
+}
+/* background black→white transition */
+.ios-intro.bg-to-light {
+  background: #fff;
+  transition: background 1.2s cubic-bezier(0.25,0.1,0.25,1);
+}
+
+/* ====== Keyframe Animations ====== */
+@keyframes wordFlyIn {
+  0%   { opacity: 0; transform: translateY(80px) scale(0.8); filter: blur(8px); }
+  60%  { opacity: 1; filter: blur(0); }
+  80%  { transform: translateY(-8px) scale(1.02); }
+  100% { transform: translateY(0) scale(1); }
+}
+@keyframes wordFlyOut {
+  0%   { opacity: 1; transform: translateY(0) scale(1); }
+  40%  { opacity: 0.6; transform: translateY(-30px) scale(1.08); }
+  100% { opacity: 0; transform: translateY(-80px) scale(0.9); filter: blur(6px); }
+}
+.ios-intro-word.slide-in {
+  animation: wordFlyIn 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.ios-intro-word.slide-out {
+  animation: wordFlyOut 0.7s cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+@keyframes logoBounceIn {
+  0%   { opacity: 0; transform: scale(0.3); filter: blur(10px); }
+  50%  { opacity: 1; filter: blur(0); transform: scale(1.08); }
+  70%  { transform: scale(0.96); }
+  85%  { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+.ios-intro-logo.show {
+  animation: logoBounceIn 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* ====== Auth Overlay Win11 Staggered Animations ====== */
+.auth-overlay > * {
+  opacity: 0;
+  transform: translateY(24px) scale(0.95);
+  transition: none;
+}
+.auth-overlay.w11-ready > * {
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.auth-overlay.w11-ready > .w11-visible {
+  opacity: 1; transform: translateY(0) scale(1);
+}
+/* auth-header special: fly from left */
+.auth-overlay > .auth-header {
+  transform: translateX(-50px) scale(0.9);
+}
+.auth-overlay.w11-ready > .auth-header.w11-visible {
+  transform: translateX(0) scale(1);
+}
+/* auth-header glow when visible */
+.auth-overlay.w11-ready > .auth-header.w11-visible .auth-title {
+  text-shadow: 0 0 30px rgba(0,122,255,0.2);
+}
+/* gender-screen special: from bottom */
+.auth-overlay > .gender-screen {
+  transform: translateY(40px) scale(0.92);
+}
+/* auth buttons glow pulse */
+.auth-overlay.w11-ready > .w11-visible .auth-btn {
+  animation: authBtnGlow 2s ease-in-out 0.5s infinite alternate;
+}
+@keyframes authBtnGlow {
+  from { box-shadow: 0 1px 4px rgba(0,122,255,0.3); }
+  to   { box-shadow: 0 4px 20px rgba(0,122,255,0.5); }
+}
 </style>
 </head>
 <body>
+
+<!-- iOS Activation Intro -->
+<div class="ios-intro" id="iosIntro">
+  <div class="ios-intro-word" id="introWord"></div>
+  <div class="ios-intro-logo" id="introLogo">
+    <div class="logo-icon"><i class="ri-fire-line"></i></div>
+    <div class="logo-text">智能健身饮食规划</div>
+    <div class="logo-sub">FitFuel Pro</div>
+    <div class="logo-date" id="introDate"></div>
+  </div>
+</div>
 <!-- Auth Overlay -->
 <div class="auth-overlay" id="authOverlay">
   <div class="auth-header">
     <div class="auth-logo-icon"><i class="ri-fire-line"></i></div>
     <div class="auth-title">FitFuel Pro</div>
-    <div class="auth-subtitle">AI 智能健身饮食规划 2.0</div>
+    <div class="auth-subtitle">AI 智能健身饮食规划 2.1</div>
   </div>
   <div class="auth-form" id="regForm">
     <div class="auth-tabs">
@@ -1313,7 +1453,7 @@ body.theme-female {
     </div>
     <div class="form-group" style="margin-bottom: 16px;">
       <label class="form-label">API KEY</label>
-      <input type="password" class="form-input" id="apiKeyInput" placeholder="在此输入 OpenRouter API Key">
+      <input type="password" class="form-input" id="apiKeyInput" placeholder="sk-or-v1-...">
     </div>
     <div class="form-group" style="margin-bottom: 20px;">
       <label class="form-label">模型</label>
@@ -1869,6 +2009,98 @@ body.theme-female {
 </div>
 
 <script>
+// ============ iOS INTRO ANIMATION ============
+(function runIntro() {
+  const introEl = document.getElementById('iosIntro');
+  if (!introEl) return;
+
+  // 已登录用户或已看过动画 → 直接跳过
+  const existingUser = localStorage.getItem('fitfuel_current_user');
+  const introSeen = localStorage.getItem('fitfuel_intro_seen');
+  if (existingUser) {
+    introEl.style.display = 'none';
+    return;
+  }
+  if (introSeen) {
+    introEl.style.display = 'none';
+    return;
+  }
+
+  const words = ['你好', '欢迎'];
+  const el = document.getElementById('introWord');
+  const logoEl = document.getElementById('introLogo');
+  let i = 0;
+
+  function showWord(word) {
+    el.className = 'ios-intro-word';
+    el.textContent = word;
+    void el.offsetWidth;
+    el.classList.add('slide-in');
+  }
+
+  function hideWord(cb) {
+    // 先加 slide-out 再移 slide-in，避免 forwards fill 消失导致文字闪烁
+    el.classList.add('slide-out');
+    el.classList.remove('slide-in');
+    setTimeout(cb, 750);
+  }
+
+  function next() {
+    if (i < words.length) {
+      showWord(words[i]);
+      i++;
+      setTimeout(() => {
+        hideWord(() => {
+          if (i < words.length) {
+            next();
+          } else {
+            el.style.cssText = 'opacity:0;pointer-events:none';
+            const d = new Date();
+            document.getElementById('introDate').textContent =
+              d.getFullYear() + ' 年 ' + (d.getMonth()+1) + ' 月 ' + d.getDate() + ' 日';
+            logoEl.classList.add('show');
+            setTimeout(() => {
+              // logo淡出 + 背景由黑过渡到白
+              logoEl.style.cssText = 'opacity:0;transform:scale(0.8);transition:opacity 0.6s,transform 0.6s;pointer-events:none';
+              setTimeout(() => {
+                introEl.classList.add('bg-to-light');
+                setTimeout(() => {
+                  // 整个intro淡出，露出auth overlay
+                  introEl.classList.add('fade-out');
+                  localStorage.setItem('fitfuel_intro_seen', '1');
+                  setTimeout(() => {
+                    introEl.style.display = 'none';
+                    // 触发 auth overlay Win11 动画
+                    activateAuthOverlay();
+                  }, 850);
+                }, 600);
+              }, 400);
+            }, 2500);
+          }
+        });
+      }, 1200);
+    }
+  }
+
+  // Win11 风格逐个激活动画（用于 auth overlay）
+  function activateAuthOverlay() {
+    const overlay = document.getElementById('authOverlay');
+    if (!overlay) return;
+    overlay.classList.add('w11-ready');
+    const children = overlay.children;
+    const delay = 100;
+    for (let c = 0; c < children.length; c++) {
+      ((idx) => {
+        setTimeout(() => {
+          children[idx].classList.add('w11-visible');
+        }, delay * (idx + 1));
+      })(c);
+    }
+  }
+
+  setTimeout(next, 300);
+})();
+
 // ============ AUTH SYSTEM ============
 const ACCOUNTS_KEY = 'fitfuel_accounts';
 const CURRENT_USER_KEY = 'fitfuel_current_user';
@@ -1895,6 +2127,28 @@ function switchAuthTab(tab) {
   else { rf.classList.add('hidden'); lf.classList.remove('hidden'); }
   document.getElementById('regError').classList.remove('show');
   document.getElementById('loginError').classList.remove('show');
+  // Win11 staggered re-entrance for the visible form
+  const visibleForm = tab === 'reg' ? rf : lf;
+  triggerAuthFormW11(visibleForm);
+}
+
+function triggerAuthFormW11(formEl) {
+  const items = formEl.children;
+  for (let c = 0; c < items.length; c++) {
+    items[c].style.opacity = '0';
+    items[c].style.transform = 'translateY(16px) scale(0.95)';
+    items[c].style.transition = 'none';
+  }
+  void formEl.offsetWidth;
+  for (let c = 0; c < items.length; c++) {
+    ((idx) => {
+      setTimeout(() => {
+        items[idx].style.transition = 'opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1), transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1)';
+        items[idx].style.opacity = '1';
+        items[idx].style.transform = 'translateY(0) scale(1)';
+      }, 80 * (idx + 1));
+    })(c);
+  }
 }
 
 function showRegForm() {
@@ -1914,8 +2168,11 @@ function handleRegister() {
   if (accs.find(a => a.phone === phone)) { err.textContent = '该手机号已注册，请直接登录'; err.classList.add('show'); return; }
   pendingAccount = { name, phone, password: hashPwd(pwd), gender: null };
   document.getElementById('regForm').classList.add('hidden');
-  document.getElementById('genderScreen').classList.add('visible');
+  const gs = document.getElementById('genderScreen');
+  gs.classList.add('visible');
   document.getElementById('genderError').classList.remove('show');
+  // Win11 staggered entrance for gender screen
+  triggerAuthFormW11(gs);
 }
 
 function selectGender(g) {
@@ -1956,6 +2213,7 @@ function handleLogin() {
 function handleLogout() {
   if (!confirm('确定要退出登录吗？')) return;
   localStorage.removeItem(CURRENT_USER_KEY);
+  localStorage.removeItem('fitfuel_intro_seen');
   currentUser = null;
   location.reload();
 }
@@ -1996,7 +2254,24 @@ function enterApp() {
       currentUser = JSON.parse(s);
       enterApp();
     } else {
-      document.getElementById('authOverlay').classList.remove('hidden');
+      // intro动画正在播放时，auth overlay 由 intro 动画结束后激活
+      // 如果没有intro（已看过），直接显示
+      const introSeen = localStorage.getItem('fitfuel_intro_seen');
+      if (introSeen) {
+        const overlay = document.getElementById('authOverlay');
+        overlay.classList.remove('hidden');
+        // 直接触发 Win11 动画
+        setTimeout(() => {
+          overlay.classList.add('w11-ready');
+          const children = overlay.children;
+          for (let c = 0; c < children.length; c++) {
+            ((idx) => {
+              setTimeout(() => { children[idx].classList.add('w11-visible'); }, 100 * (idx + 1));
+            })(c);
+          }
+        }, 100);
+      }
+      // 否则 intro 动画完成后会自动激活
     }
   } catch(e) {
     document.getElementById('authOverlay').classList.remove('hidden');
