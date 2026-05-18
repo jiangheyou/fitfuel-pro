@@ -6,11 +6,36 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#f2f2f7" id="metaThemeColor">
-<title>FitFuel Pro 2.1 - 智能健身饮食规划</title>
-<!-- Firebase SDK (compat mode for single-file) -->
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<title>FitFuel Pro 2.5 - 智能健身饮食规划</title>
+<!-- Firebase SDK (compat mode) - async loaded to avoid white screen if CDN is blocked -->
+<script>
+  window.firebaseReady = false;
+  var _fbSrcs = [
+    'https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js',
+    'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js',
+    'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js'
+  ];
+  var _fbLoaded = 0;
+  _fbSrcs.forEach(function(u, i) {
+    var s = document.createElement('script');
+    s.src = u; s.async = true;
+    s.onload = function() {
+      _fbLoaded++;
+      if (_fbLoaded === _fbSrcs.length) {
+        window.firebaseReady = true;
+        document.dispatchEvent(new Event('firebase-sdk-ready'));
+      }
+    };
+    s.onerror = function() {
+      console.warn('[FitFuel] Firebase SDK failed to load:', u);
+      _fbLoaded++; // count as done so we don't block forever
+      if (_fbLoaded === _fbSrcs.length) {
+        document.dispatchEvent(new Event('firebase-sdk-ready'));
+      }
+    };
+    document.head.appendChild(s);
+  });
+</script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
 <style>
@@ -629,8 +654,9 @@
   .cloud-badge:hover { border-color: var(--accent-primary); color: var(--text-primary); }
   .cloud-badge.synced { border-color: rgba(52,199,89,0.3); color: var(--success); }
   .cloud-badge.syncing { border-color: rgba(0,122,255,0.3); color: var(--accent-primary); }
-  .cloud-badge.sync-failed { border-color: rgba(255,59,48,0.3); color: var(--danger); }
-  .cloud-badge i { font-size: 14px; }
+.cloud-badge.sync-failed { border-color: rgba(255,59,48,0.3); color: var(--danger); }
+.cloud-badge.sync-offline { border-color: rgba(255,159,10,0.3); color: var(--warning); }
+.cloud-badge i { font-size: 14px; }
   .cloud-badge.syncing i { animation: cloudSpin 1s linear infinite; }
   @keyframes cloudSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
@@ -2164,6 +2190,8 @@ const DEFAULT_FIREBASE_CONFIG = {
   appId: "1:684098366586:web:58969b10282d0daee11fc3"
 };
 
+let fbAuthReady = false; // 标记 onAuthStateChanged 是否已触发
+
 function initFirebase(config) {
   try {
     if (fbApp) { try { fbApp.delete(); } catch(e) {} }
@@ -2171,7 +2199,16 @@ function initFirebase(config) {
     fbAuth = fbApp.auth();
     fbDb = fbApp.firestore();
     firebaseAvailable = true;
+    fbAuthReady = false;
     updateFirebaseStatus('connecting');
+    // 超时检测：10秒后如果 onAuthStateChanged 未触发，标记为连接失败
+    setTimeout(function() {
+      if (!fbAuthReady && firebaseAvailable) {
+        console.warn('[FitFuel] Firebase connection timeout (10s), marking as unreachable');
+        updateFirebaseStatus('timeout');
+        updateCloudBadge('offline');
+      }
+    }, 10000);
     // onAuthStateChanged 由 checkSession() 统一注册，此处不重复注册
     return true;
   } catch(e) {
@@ -2189,6 +2226,7 @@ function updateFirebaseStatus(state) {
     'connecting': { bg: '#f0ad4e', title: '连接中...' },
     'connected':  { bg: '#28a745', title: '已连接' },
     'error':      { bg: '#dc3545', title: '连接失败' },
+    'timeout':    { bg: '#e67e22', title: '连接超时（网络受限）' },
     'disconnected': { bg: '#ccc', title: '未配置' }
   };
   const s = map[state] || map['disconnected'];
@@ -2229,8 +2267,14 @@ function saveFirebaseConfig() {
 }
 
 // 页面加载时自动初始化 Firebase（内置配置 + 用户可覆盖）
-(function autoInitFirebase() {
+// 等待 Firebase SDK 异步加载完成后再初始化，避免 SDK 加载失败导致白屏
+function _doAutoInitFirebase() {
   try {
+    if (typeof firebase === 'undefined' || !firebase.initializeApp) {
+      console.warn('Firebase SDK not available, using localStorage mode');
+      firebaseAvailable = false;
+      return;
+    }
     // 优先用 localStorage 覆盖配置，否则用内置默认配置
     const raw = localStorage.getItem(FIREBASE_CONFIG_KEY);
     let config;
@@ -2258,7 +2302,22 @@ function saveFirebaseConfig() {
     console.warn('autoInitFirebase failed, using localStorage mode:', e);
     firebaseAvailable = false;
   }
-})();
+}
+// 如果 SDK 已经加载（window.firebaseReady=true），立即执行；否则等事件
+if (window.firebaseReady) {
+  _doAutoInitFirebase();
+} else {
+  document.addEventListener('firebase-sdk-ready', _doAutoInitFirebase, { once: true });
+  // 兜底：5秒后如果SDK还没加载完，放弃Firebase走localStorage模式
+  setTimeout(function() {
+    if (!window.firebaseReady && typeof firebase === 'undefined') {
+      console.warn('[FitFuel] Firebase SDK load timeout (5s), falling back to localStorage');
+      firebaseAvailable = false;
+    } else if (!firebaseAvailable) {
+      _doAutoInitFirebase();
+    }
+  }, 5000);
+}
 
 // ===== Firestore 混合读写封装 =====
 function getUserUid() {
@@ -2659,6 +2718,7 @@ async function enterApp() {
   // Firebase 模式：监听 auth 状态
   if (firebaseAvailable && fbAuth) {
     fbAuth.onAuthStateChanged(async (user) => {
+      fbAuthReady = true; // 标记 auth 回调已触发
       const overlay = document.getElementById('authOverlay');
       // 如果 auth overlay 已隐藏 = 用户已在主界面，不要干扰
       if (overlay && overlay.classList.contains('hidden')) {
@@ -2982,7 +3042,7 @@ function updateCloudBadge(status, detail='') {
   const icon = document.getElementById('cloudIcon');
   const text = document.getElementById('cloudBadgeText');
   if (!badge || !icon || !text) return;
-  badge.classList.remove('synced','syncing','sync-failed');
+  badge.classList.remove('synced','syncing','sync-failed','sync-offline');
   if (status === 'synced') {
     badge.classList.add('synced');
     icon.className = 'ri-cloud-line';
@@ -2994,7 +3054,11 @@ function updateCloudBadge(status, detail='') {
   } else if (status === 'failed') {
     badge.classList.add('sync-failed');
     icon.className = 'ri-cloud-off-line';
-    text.textContent = '未同步';
+    text.textContent = detail || '未同步';
+  } else if (status === 'offline') {
+    badge.classList.add('sync-offline');
+    icon.className = 'ri-cloud-off-line';
+    text.textContent = '离线模式';
   } else {
     icon.className = 'ri-cloud-off-line';
     text.textContent = '未连接';
@@ -3003,27 +3067,35 @@ function updateCloudBadge(status, detail='') {
 
 async function handleCloudBadgeClick() {
   if (!firebaseAvailable || !fbAuth) {
-    showToast('请先配置 Firebase 以启用云同步', 'error');
-    openApiModal();
+    showToast('Firebase 不可用，当前为离线模式（数据保存在本地）', 'info');
     return;
   }
   if (!currentUser) return;
-  // 如果之前同步失败，点击重试
+  // 如果之前同步失败或离线，点击重试
   const badge = document.getElementById('cloudBadge');
-  if (badge && badge.classList.contains('sync-failed')) {
+  if (badge && (badge.classList.contains('sync-failed') || badge.classList.contains('sync-offline'))) {
     await syncAccountToCloud();
   }
 }
 
 async function syncAccountToCloud() {
-  if (!firebaseAvailable || !fbAuth || !fbDb || !currentUser) return;
+  if (!firebaseAvailable || !fbAuth || !fbDb || !currentUser) {
+    if (!firebaseAvailable) {
+      updateCloudBadge('offline');
+      showToast('云同步不可用：网络无法连接 Firebase（离线模式）', 'info');
+    } else {
+      updateCloudBadge('failed');
+      showToast('同步失败：Firebase 未配置或未登录', 'error');
+    }
+    return;
+  }
   updateCloudBadge('syncing');
   showToast('正在同步账号到云端...', 'info');
   try {
     // 确保 Firebase Auth 已登录
     let user = fbAuth.currentUser;
     if (!user) {
-      const pseudoEmail = (currentUser.phone || 'user@fitfuel.app') + '@fitfuel.app';
+      const pseudoEmail = (currentUser.phone || 'user') + '@fitfuel.app';
       const saved = getAccounts().find(a => a.phone === currentUser.phone);
       const pwd = saved ? atob(saved.password) : 'defaultPwd123!';
       try { await fbAuth.signInWithEmailAndPassword(pseudoEmail, pwd); }
@@ -3049,10 +3121,21 @@ async function syncAccountToCloud() {
     }
     updateCloudBadge('synced');
     showToast('云端同步成功 ☁', 'success');
-  } catch(e) {
-    console.warn('Cloud sync failed:', e.message);
-    updateCloudBadge('failed');
-    showToast('云端同步失败：' + e.message, 'error');
+    } catch(e) {
+    console.warn('Cloud sync failed:', e.message, e.code);
+    // 区分错误类型给出友好提示
+    let errMsg = '同步失败';
+    if (e.code === 'auth/network-request-failed' || e.message.includes('network') || e.message.includes('Network')) {
+      errMsg = '网络无法连接 Firebase（国内可能需科学上网）';
+      updateCloudBadge('offline');
+    } else if (e.code === 'permission-denied' || e.code === 'PERMISSION_DENIED') {
+      errMsg = 'Firestore 权限不足，请检查安全规则';
+      updateCloudBadge('failed');
+    } else {
+      errMsg = e.message || '未知错误';
+      updateCloudBadge('failed');
+    }
+    showToast('云端同步失败：' + errMsg, 'error');
   }
 }
 
